@@ -53,6 +53,22 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  const renderWithLinks = (text) => {
+    const s = String(text ?? '')
+    const urlRe = /(https?:\/\/[^\s]+)/g
+    const parts = s.split(urlRe)
+    return parts.map((part, idx) => {
+      if (part.match(urlRe)) {
+        return (
+          <a key={idx} href={part} target="_blank" rel="noreferrer">
+            {part}
+          </a>
+        )
+      }
+      return <span key={idx}>{part}</span>
+    })
+  }
+
   const sendMessage = async (e) => {
     e.preventDefault()
     if (!input.trim() || loading) return
@@ -64,20 +80,82 @@ function App() {
     }
 
     setMessages(prev => [...prev, userMessage])
+    const q = input.trim()
     setInput('')
     setLoading(true)
 
     try {
-      // Use the API for FAQ search
-      const response = await fetch(`/api/faq?q=${encodeURIComponent(input)}&limit=3`);
-      
+      let botMessage;
+
+      // Handle greetings locally so the bot feels conversational.
+      // This avoids wasting quota and prevents odd “fund answers” to “hi”.
+      const isGreeting = /^(hi|hello|hey|yo|hii|hiii|hola|good\s*(morning|afternoon|evening))[\s!.]*$/i.test(q)
+      if (isGreeting) {
+        botMessage = {
+          type: 'bot',
+          content:
+            "Hi there! 👋 I'm your INDMoney FAQ Assistant—here to help with all your mutual fund questions. Ask away!",
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, botMessage])
+        return
+      }
+
+      const aiRes = await fetch('/api/ai/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: q,
+          use_context: true,
+          use_rag: true,
+        }),
+      });
+
+      if (aiRes.ok) {
+        const payload = await aiRes.json();
+        const src = payload.source;
+        const text = (payload.answer || '').trim();
+        if (src && src !== 'error' && text) {
+          botMessage = {
+            type: 'bot',
+            content: text,
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, botMessage]);
+          return;
+        }
+        // If AI returned an error (often quota / rate-limit), show it instead of
+        // silently falling back to an empty FAQ response.
+        if (src === 'error' && text) {
+          const retryMatch = text.match(/retry in\s+(\d+)\s*\.?(\d+)?s/i) || text.match(/retry_delay.*seconds:\s*(\d+)/i)
+          const retrySeconds = retryMatch ? (retryMatch[1] || retryMatch[0]) : null
+          const friendly =
+            retrySeconds
+              ? `I’m temporarily rate-limited by the AI provider. Please try again in about ${retrySeconds}s.`
+              : `I’m temporarily unable to reach the AI provider. Please try again in a moment.`
+          botMessage = {
+            type: 'bot',
+            content: friendly,
+            timestamp: new Date(),
+            isError: true
+          }
+          setMessages(prev => [...prev, botMessage]);
+          return;
+        }
+      }
+
+      const response = await fetch(`/api/faq?q=${encodeURIComponent(q)}&limit=5`);
       if (response.ok) {
         const data = await response.json();
-        
-        let botMessage;
         if (data.length > 0) {
-          // Format the FAQ responses
-          const answer = data.map(faq => `Q: ${faq.question}\nA: ${faq.answer}`).join('\n\n');
+          const answer =
+            `I couldn’t reach the AI right now, but here’s what I found in the FAQ database:\n\n` +
+            data.map((faq) => {
+              const fund = faq.fund_name ? `• Fund: ${faq.fund_name}\n` : '• '
+              const qa = `  ${faq.question}\n  ${faq.answer}\n`
+              const src = faq.source_url ? `  Source: ${faq.source_url}` : ''
+              return `${fund}${qa}${src}`.trimEnd()
+            }).join('\n\n')
           botMessage = {
             type: 'bot',
             content: answer,
@@ -90,10 +168,9 @@ function App() {
             timestamp: new Date()
           };
         }
-        
         setMessages(prev => [...prev, botMessage]);
       } else {
-        throw new Error(`Failed to search FAQs: ${response.status}`);
+        throw new Error(`Request failed: ${response.status}`);
       }
     } catch (error) {
       const errorMessage = {
@@ -150,7 +227,7 @@ function App() {
               {messages.map((message, index) => (
                 <div key={index} className={`message ${message.type}`}>
                   <div className="message-bubble">
-                    <div className="message-content">{message.content}</div>
+                    <div className="message-content">{renderWithLinks(message.content)}</div>
                   </div>
                 </div>
               ))}

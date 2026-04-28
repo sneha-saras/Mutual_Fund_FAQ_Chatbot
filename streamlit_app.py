@@ -84,19 +84,41 @@ with tab1:
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Get response from backend
+        # Prefer AI + RAG when API returns a real Gemini answer; else keyword FAQ search
         try:
-            response = requests.get(f"{BACKEND_URL}/api/faq?q={prompt}&limit=3")
-            if response.status_code == 200:
-                data = response.json()
-                if data:
-                    # Format the FAQ responses
-                    answer = "\n\n".join([f"**Q: {faq['question']}**\n\n{faq['answer']}" for faq in data])
+            answer = None
+            ai_resp = requests.post(
+                f"{BACKEND_URL}/api/ai/ask",
+                json={
+                    "question": prompt,
+                    "use_context": True,
+                    "use_rag": True,
+                },
+                timeout=120,
+            )
+            if ai_resp.status_code == 200:
+                payload = ai_resp.json()
+                src = payload.get("source")
+                text = (payload.get("answer") or "").strip()
+                if src and src != "error" and text:
+                    answer = text
+            if answer is None:
+                response = requests.get(
+                    f"{BACKEND_URL}/api/faq",
+                    params={"q": prompt, "limit": 5},
+                    timeout=30,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        answer = "\n\n".join(
+                            [f"**Q: {faq['question']}**\n\n{faq['answer']}" for faq in data]
+                        )
+                    else:
+                        answer = "I couldn't find any relevant information for your question. Please try rephrasing."
                 else:
-                    answer = "I couldn't find any relevant information for your question. Please try rephrasing."
-            else:
-                answer = "Sorry, I'm having trouble connecting to the backend service."
-        except Exception as e:
+                    answer = "Sorry, I'm having trouble connecting to the backend service."
+        except Exception:
             answer = "Sorry, I encountered an error while processing your request."
         
         # Add bot response to chat
@@ -161,12 +183,12 @@ Built with:
 st.sidebar.title("Quick Questions")
 if st.sidebar.button("What is minimum SIP amount?"):
     st.session_state.messages.append({"role": "user", "content": "What is the minimum SIP amount?"})
-    st.experimental_rerun()
+    st.rerun()
 
 if st.sidebar.button("What is expense ratio?"):
     st.session_state.messages.append({"role": "user", "content": "What is expense ratio?"})
-    st.experimental_rerun()
+    st.rerun()
 
 if st.sidebar.button("Tell me about HDFC Mid Cap Fund"):
     st.session_state.messages.append({"role": "user", "content": "Tell me about HDFC Mid Cap Fund"})
-    st.experimental_rerun()
+    st.rerun()

@@ -14,6 +14,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_GEMINI_EMBEDDING_MODEL = os.getenv(
+    "GEMINI_EMBEDDING_MODEL",
+    # Available for many keys; confirm via `genai.list_models()` with embedContent support
+    "models/gemini-embedding-001",
+)
+
 
 class RAGService:
     """
@@ -29,7 +35,7 @@ class RAGService:
         api_key = os.getenv('GEMINI_API_KEY')
         if api_key:
             genai.configure(api_key=api_key)
-            self.embedding_model = "models/text-embedding-004"
+            self.embedding_model = DEFAULT_GEMINI_EMBEDDING_MODEL
             self.enabled = True
             print("✓ RAG Service initialized with Gemini embeddings")
         else:

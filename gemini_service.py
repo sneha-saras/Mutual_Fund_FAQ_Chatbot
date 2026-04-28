@@ -1,15 +1,20 @@
 """
 Gemini AI Service for Intelligent FAQ Answering
-Uses Google Gemini Flash 2.0 for fast, free responses
+Uses Google Gemini (default: gemini-2.5-flash) for responses
 NOW WITH RAG - Retrieval Augmented Generation
 """
 
 import google.generativeai as genai
 from typing import List, Dict, Optional
 import os
+import re
 from data_storage import DataStorage
 import sqlite3
 from rag_service import rag_service
+
+# Must be a model your key can call (see https://ai.google.dev/gemini-api/docs/models )
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
 
 class GeminiService:
     def __init__(self, api_key: Optional[str] = None):
@@ -23,17 +28,19 @@ class GeminiService:
             print("⚠️  Warning: GEMINI_API_KEY not set. Set it in .env file or environment variable.")
             self.enabled = False
             self.model = None
+            self.model_name = ""
         else:
             try:
                 genai.configure(api_key=self.api_key)
-                # Use Gemini 2.0 Flash - fastest and free
-                self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                self.model_name = DEFAULT_GEMINI_MODEL
+                self.model = genai.GenerativeModel(self.model_name)
                 self.enabled = True
-                print("✓ Gemini Flash 2.0 initialized successfully")
+                print(f"✓ Gemini initialized ({self.model_name})")
             except Exception as e:
                 print(f"⚠️  Warning: Failed to initialize Gemini: {e}")
                 self.enabled = False
                 self.model = None
+                self.model_name = ""
         
         self.storage = DataStorage()
     
@@ -156,31 +163,31 @@ class GeminiService:
         
         try:
             # Build prompt
+            context = ""
             retrieval_method = "none"
             if use_context:
                 context = self.get_fund_context(query=question, use_rag=use_rag)
                 retrieval_method = "rag" if (use_rag and rag_service.enabled) else "full_context"
                 
-                prompt = f"""You are a helpful HDFC Mutual Funds specialist at INDMoney.
-You help investors understand and invest in HDFC mutual funds.
+                prompt = f"""You are a helpful mutual fund investment assistant at INDMoney.
+You answer using the provided context and avoid guessing.
 
 {context}
 
 User Question: {question}
 
 Instructions:
-- Provide clear, helpful answers focusing on HDFC funds
+- Provide clear, beginner-friendly answers
 - Use simple bullet points with • symbol (not asterisks or markdown)
 - Be polite and professional
-- If exact data is unavailable, provide information about similar HDFC funds that ARE available
-- Use specific data from the available HDFC funds
+- If exact data is unavailable in the provided context, say so briefly and suggest what to check next
+- Use specific numbers from the provided context when possible
 - When comparing funds, mention key metrics (returns, expense ratio, risk)
 - Keep response under 200 words
 - Use ₹ symbol for rupees
 - Always be helpful - avoid saying "I cannot answer" unless absolutely no relevant information exists
 - Do NOT use markdown formatting (* or ** or #)
 - Use plain text with • for bullet points
-- Add a "Sources:" section at the end listing fund names you referenced
 
 Answer:"""
             else:
@@ -197,12 +204,37 @@ Provide a clear, helpful answer in under 150 words."""
             
             # Extract fund sources from context
             sources = self._extract_fund_sources(context, question)
+
+            # Hard rule: never return model-invented URLs.
+            # Keep only URLs that come from the DB source list.
+            allowed_urls = { (s.get("url") or "").strip() for s in (sources or []) }
+            allowed_urls.discard("")
+            if allowed_urls:
+                url_re = re.compile(r"https?://\\S+")
+                found_urls = set(url_re.findall(answer_text))
+                for url in found_urls:
+                    if url not in allowed_urls:
+                        answer_text = answer_text.replace(url, "")
+            else:
+                # If we don't have any trusted sources, strip all URLs.
+                answer_text = re.sub(r"https?://\\S+", "", answer_text)
+
+            # Prefer real URLs from DB over model-made "Sources:" text.
+            if sources:
+                sources_lines = ["", "Sources:"]
+                for s in sources:
+                    name = (s.get("fund_name") or "").strip()
+                    url = (s.get("url") or "").strip()
+                    if name and url:
+                        sources_lines.append(f"• {name}: {url}")
+                if len(sources_lines) > 2:
+                    answer_text = answer_text + "\n" + "\n".join(sources_lines)
             
             return {
                 "answer": answer_text,
-                "source": "gemini-2.0-flash",
+                "source": self.model_name,
                 "confidence": "high",
-                "model": "gemini-2.0-flash-exp",
+                "model": self.model_name,
                 "retrieval_method": retrieval_method,
                 "fund_sources": sources
             }
@@ -248,8 +280,8 @@ Format the response in a clear, structured way."""
             
             return {
                 "comparison": response.text.strip(),
-                "source": "gemini-2.0-flash",
-                "model": "gemini-2.0-flash-exp"
+                "source": self.model_name,
+                "model": self.model_name
             }
             
         except Exception as e:
@@ -296,8 +328,8 @@ Be specific and use actual fund data."""
             
             return {
                 "advice": response.text.strip(),
-                "source": "gemini-2.0-flash",
-                "model": "gemini-2.0-flash-exp"
+                "source": self.model_name,
+                "model": self.model_name
             }
             
         except Exception as e:
@@ -331,8 +363,8 @@ Keep it concise (under 150 words) and easy to understand."""
             return {
                 "explanation": response.text.strip(),
                 "term": term,
-                "source": "gemini-2.0-flash",
-                "model": "gemini-2.0-flash-exp"
+                "source": self.model_name,
+                "model": self.model_name
             }
             
         except Exception as e:
@@ -340,6 +372,10 @@ Keep it concise (under 150 words) and easy to understand."""
                 "explanation": f"Error generating explanation: {str(e)}",
                 "source": "error"
             }
+
+
+# Shared instance for API and scripts
+gemini = GeminiService()
 
 
 # Test the service
@@ -361,8 +397,6 @@ if __name__ == "__main__":
         print("\nOr set it temporarily:")
         print("   export GEMINI_API_KEY=your_key_here")
         sys.exit(1)
-    
-    gemini = GeminiService()
     
     if gemini.enabled:
         print("\n✓ Gemini initialized successfully!")

@@ -1,6 +1,6 @@
 """
 Minimal Gemini AI Service for Vercel Deployment
-Uses Google Gemini Flash 2.0 for fast, free responses
+Uses Google Gemini (default: gemini-2.5-flash) for responses
 """
 
 # Import with error handling for Vercel deployment
@@ -16,6 +16,9 @@ import os
 from data_storage import DataStorage
 import sqlite3
 
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+
 class GeminiService:
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -28,20 +31,24 @@ class GeminiService:
             print("⚠️  Warning: GEMINI_API_KEY not set or Gemini not available.")
             self.enabled = False
             self.model = None
+            self.model_name = ""
         else:
             try:
                 # Use Gemini 2.0 Flash - fastest and free
                 if GenerativeModel is not None:
-                    self.model = GenerativeModel('gemini-2.0-flash-exp')
+                    self.model_name = DEFAULT_GEMINI_MODEL
+                    self.model = GenerativeModel(self.model_name)
                     self.enabled = True
-                    print("✓ Gemini Flash 2.0 initialized successfully")
+                    print(f"✓ Gemini initialized ({self.model_name})")
                 else:
                     self.enabled = False
                     self.model = None
+                    self.model_name = ""
             except Exception as e:
                 print(f"⚠️  Warning: Failed to initialize Gemini: {e}")
                 self.enabled = False
                 self.model = None
+                self.model_name = ""
         
         self.storage = DataStorage()
     
@@ -159,9 +166,9 @@ Provide a clear, helpful answer in under 150 words."""
             
             return {
                 "answer": answer_text,
-                "source": "gemini-2.0-flash",
+                "source": self.model_name,
                 "confidence": "high",
-                "model": "gemini-2.0-flash-exp"
+                "model": self.model_name
             }
             
         except Exception as e:
@@ -204,8 +211,8 @@ Format the response in a clear, structured way."""
             
             return {
                 "comparison": response.text.strip(),
-                "source": "gemini-2.0-flash",
-                "model": "gemini-2.0-flash-exp"
+                "source": self.model_name,
+                "model": self.model_name
             }
             
         except Exception as e:
@@ -251,8 +258,8 @@ Be specific and use actual fund data."""
             
             return {
                 "advice": response.text.strip(),
-                "source": "gemini-2.0-flash",
-                "model": "gemini-2.0-flash-exp"
+                "source": self.model_name,
+                "model": self.model_name
             }
             
         except Exception as e:
@@ -286,8 +293,8 @@ Keep it concise (under 150 words) and easy to understand."""
             return {
                 "explanation": response.text.strip(),
                 "term": term,
-                "source": "gemini-2.0-flash",
-                "model": "gemini-2.0-flash-exp"
+                "source": self.model_name,
+                "model": self.model_name
             }
             
         except Exception as e:

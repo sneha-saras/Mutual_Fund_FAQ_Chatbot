@@ -33,14 +33,14 @@ app.add_middleware(
 # Initialize storage
 storage = DataStorage()
 
-# Simple flag to indicate if advanced features are available
-AI_AVAILABLE = False
+# Gemini + RAG (optional: heavy deps or missing GEMINI_API_KEY)
+gemini = None
 try:
-    import google.generativeai as genai
-    AI_AVAILABLE = True
-except ImportError:
-    AI_AVAILABLE = False
-    print("Warning: Google Generative AI not available. AI features will be disabled.")
+    from gemini_service import gemini
+except ImportError as e:
+    print(f"Warning: gemini_service not importable, AI routes disabled: {e}")
+
+AI_AVAILABLE = bool(gemini and getattr(gemini, "enabled", False))
 
 # Pydantic models
 class Fund(BaseModel):
@@ -71,6 +71,7 @@ class FAQ(BaseModel):
 class AskQuestion(BaseModel):
     question: str
     use_context: bool = True
+    use_rag: bool = True
 
 class InvestmentProfile(BaseModel):
     amount: int
@@ -82,18 +83,25 @@ class InvestmentProfile(BaseModel):
 @app.get("/")
 def read_root():
     """API health check and info"""
+    endpoints: Dict[str, str] = {
+        "funds": "/api/funds",
+        "fund_detail": "/api/funds/{fund_id}",
+        "search": "/api/search",
+        "faq": "/api/faq",
+        "compare": "/api/compare",
+        "stats": "/api/stats",
+    }
+    if gemini is not None:
+        endpoints["ai_ask"] = "/api/ai/ask"
+        endpoints["ai_compare"] = "/api/ai/compare"
+        endpoints["ai_advice"] = "/api/ai/advice"
+        endpoints["ai_explain"] = "/api/ai/explain"
     return {
         "message": "INDMoney FAQ Assistant API",
         "version": "1.0.0",
         "ai_available": AI_AVAILABLE,
-        "endpoints": {
-            "funds": "/api/funds",
-            "fund_detail": "/api/funds/{fund_id}",
-            "search": "/api/search",
-            "faq": "/api/faq",
-            "compare": "/api/compare",
-            "stats": "/api/stats"
-        },
+        "gemini_module_loaded": gemini is not None,
+        "endpoints": endpoints,
         "documentation": {
             "swagger": "/docs",
             "redoc": "/redoc"
@@ -341,24 +349,43 @@ def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============ AI Endpoints (Only if AI is available) ============
-if AI_AVAILABLE:
+# ============ AI Endpoints (gemini_service + optional RAG) ============
+if gemini is not None:
     @app.post("/api/ai/ask")
     def ai_ask_question(request: AskQuestion):
-        """Ask a question and get AI-powered answer"""
-        return {"answer": "AI features are not available in this deployment", "source": "none"}
-    
+        """Ask a question and get AI-powered answer (RAG when indexed + enabled)."""
+        q = (request.question or "").strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="question is required")
+        return gemini.answer_question(
+            q,
+            use_context=request.use_context,
+            use_rag=request.use_rag,
+        )
+
     @app.get("/api/ai/compare")
-    def ai_compare_funds(funds: str = Query(..., description="Comma-separated fund names")):
+    def ai_compare_funds(
+        funds: str = Query(..., description="Comma-separated fund names")
+    ):
         """Compare funds using AI analysis"""
-        return {"comparison": "AI features are not available in this deployment", "source": "none"}
-    
+        names = [f.strip() for f in funds.split(",") if f.strip()]
+        if len(names) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide at least two comma-separated fund names",
+            )
+        return gemini.compare_funds(names)
+
     @app.post("/api/ai/advice")
     def ai_investment_advice(profile: InvestmentProfile):
         """Get personalized investment advice using AI"""
-        return {"advice": "AI features are not available in this deployment", "source": "none"}
-    
+        return gemini.get_investment_advice(
+            profile.amount,
+            profile.risk_appetite,
+            profile.duration,
+        )
+
     @app.get("/api/ai/explain")
     def ai_explain_term(term: str = Query(..., description="Term to explain")):
         """Explain a mutual fund term using AI"""
-        return {"explanation": "AI features are not available in this deployment", "source": "none"}
+        return gemini.explain_term(term)

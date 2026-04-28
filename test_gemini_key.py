@@ -5,12 +5,13 @@ import google.generativeai as genai
 load_dotenv()
 
 api_key = os.getenv('GEMINI_API_KEY')
-print(f"🔑 API Key loaded: {api_key[:20]}..." if api_key else "❌ No API key found")
+model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+print("🔑 API Key loaded: yes" if api_key else "❌ No API key found")
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel(model_name)
         
         print("\n🧪 Testing Gemini API...")
         response = model.generate_content("Say 'Hello from INDMoney!' in one sentence.")

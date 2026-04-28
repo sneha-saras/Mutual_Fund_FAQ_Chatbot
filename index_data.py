@@ -3,10 +3,20 @@ Index FAQs and Funds into Vector Database
 Run this script to build the RAG index
 """
 
-from rag_service import rag_service
+import argparse
 import sys
+from rag_service import rag_service
+
 
 def main():
+    parser = argparse.ArgumentParser(description="Index FAQs and funds into Chroma (RAG).")
+    parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Reindex without interactive prompt (useful for CI or scripts).",
+    )
+    args = parser.parse_args()
+
     print("=" * 70)
     print("🚀 INDEXING FAQS AND FUNDS INTO VECTOR DATABASE")
     print("=" * 70)
@@ -22,10 +32,12 @@ def main():
     print(f"   - Funds indexed: {rag_service.fund_collection.count()}")
     print()
     
-    # Ask user if they want to force reindex
     if rag_service.faq_collection.count() > 0 or rag_service.fund_collection.count() > 0:
-        response = input("⚠️  Data already indexed. Force reindex? (y/N): ").strip().lower()
-        force_reindex = response == 'y'
+        if args.force:
+            force_reindex = True
+        else:
+            response = input("⚠️  Data already indexed. Force reindex? (y/N): ").strip().lower()
+            force_reindex = response == 'y'
     else:
         force_reindex = False
     
