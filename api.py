@@ -5,6 +5,8 @@ Provides REST API for mutual fund data and FAQ search
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from data_storage import DataStorage
@@ -20,6 +22,9 @@ app = FastAPI(
     description="REST API for mutual fund information and FAQ search",
     version="1.0.0"
 )
+
+# Frontend build output (served in production)
+FRONTEND_DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 # CORS configuration for frontend
 app.add_middleware(
@@ -79,9 +84,9 @@ class InvestmentProfile(BaseModel):
     duration: str  # short, medium, long
 
 
-# API Endpoints
-@app.get("/")
-def read_root():
+# API info endpoint (used by the frontend)
+@app.get("/api")
+def api_info():
     """API health check and info"""
     endpoints: Dict[str, str] = {
         "funds": "/api/funds",
@@ -107,6 +112,16 @@ def read_root():
             "redoc": "/redoc"
         }
     }
+
+
+# Serve the frontend (if built). This keeps Railway as a single service.
+if os.path.isdir(FRONTEND_DIST_DIR):
+    @app.get("/")
+    def serve_frontend_index():
+        return FileResponse(os.path.join(FRONTEND_DIST_DIR, "index.html"))
+
+    # Static assets + client-side routing fallback (html=True serves index.html)
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend")
 
 
 @app.get("/api/funds", response_model=List[Fund])

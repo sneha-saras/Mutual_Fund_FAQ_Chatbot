@@ -1,0 +1,3 @@
+## This repo is deployed on Railway via the Dockerfile.
+## If you switch back to Nixpacks, remove the Dockerfile and configure Node+Python build phases.
+
